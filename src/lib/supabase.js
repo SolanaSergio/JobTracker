@@ -124,6 +124,36 @@ CREATE TABLE IF NOT EXISTS saved_searches (
     created_at TIMESTAMPTZ DEFAULT now()
 );
 
+-- Tasks / reminders
+CREATE TABLE IF NOT EXISTS tasks (
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    title TEXT NOT NULL,
+    notes TEXT,
+    priority TEXT DEFAULT 'normal',
+    due_date TIMESTAMPTZ,
+    completed_at TIMESTAMPTZ,
+    application_id UUID,
+    contact_id UUID,
+    created_at TIMESTAMPTZ DEFAULT now(),
+    updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- Interview events
+CREATE TABLE IF NOT EXISTS events (
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    title TEXT NOT NULL,
+    notes TEXT,
+    starts_at TIMESTAMPTZ NOT NULL,
+    ends_at TIMESTAMPTZ,
+    location TEXT,
+    meeting_link TEXT,
+    application_id UUID,
+    contact_id UUID,
+    kind TEXT DEFAULT 'interview',
+    created_at TIMESTAMPTZ DEFAULT now(),
+    updated_at TIMESTAMPTZ DEFAULT now()
+);
+
 -- Activity log
 CREATE TABLE IF NOT EXISTS activity_log (
     id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
@@ -142,6 +172,8 @@ ALTER TABLE resumes ENABLE ROW LEVEL SECURITY;
 ALTER TABLE resume_submissions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE saved_searches ENABLE ROW LEVEL SECURITY;
 ALTER TABLE activity_log ENABLE ROW LEVEL SECURITY;
+ALTER TABLE tasks ENABLE ROW LEVEL SECURITY;
+ALTER TABLE events ENABLE ROW LEVEL SECURITY;
 
 -- Allow all operations for anon key (personal tool)
 CREATE POLICY "Allow all" ON applications FOR ALL USING (true) WITH CHECK (true);
@@ -151,6 +183,8 @@ CREATE POLICY "Allow all" ON resumes FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow all" ON resume_submissions FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow all" ON saved_searches FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow all" ON activity_log FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow all" ON tasks FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow all" ON events FOR ALL USING (true) WITH CHECK (true);
 
 -- Create storage bucket for resumes
 INSERT INTO storage.buckets (id, name, public) VALUES ('resumes', 'resumes', true) ON CONFLICT DO NOTHING;

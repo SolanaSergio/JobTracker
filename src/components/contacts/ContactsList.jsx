@@ -1,315 +1,290 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import {
+  Search as SearchIcon, Plus, Mail, Phone, Link2 as LinkedinIcon, Building2, Users, Trash2, MessageSquare, Pencil, MoreHorizontal, ExternalLink
+} from 'lucide-react';
 import { useSupabaseQuery, useSupabaseCrud, useActivityLog } from '../../hooks/useSupabase';
 import { isSupabaseConfigured } from '../../lib/supabase';
+import { useApp } from '../../lib/app-context';
 import { CALL_OUTCOMES } from '../../utils/constants';
-import { formatDate, formatDateTime, timeAgo } from '../../utils/helpers';
-import { useToast, Modal, EmptyState, Spinner, ConfirmModal } from '../ui/UI';
+import { formatDateTime, timeAgo, getInitials } from '../../utils/helpers';
+import { Card, CardContent } from '../ui/card';
+import { Button } from '../ui/button';
+import { Badge } from '../ui/badge';
+import { Input } from '../ui/input';
+import { Textarea } from '../ui/textarea';
+import { Label } from '../ui/label';
+import { Avatar, AvatarFallback } from '../ui/avatar';
+import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '../ui/select';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '../ui/dialog';
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from '../ui/dropdown-menu';
+import { EmptyState, PageLoader, toast } from '../ui/feedback';
+import { cn } from '../../lib/cn';
 
-export default function ContactsList({ onNavigate }) {
+export default function ContactsList() {
   const configured = isSupabaseConfigured();
+  const { navigate, setQuickAddOpen } = useApp();
   const { data: contacts, loading, refetch } = useSupabaseQuery('contacts');
   const { data: callLogs, refetch: refetchLogs } = useSupabaseQuery('call_logs', { orderBy: 'call_date', ascending: false });
-  const { insert: insertContact, update: updateContact, remove: removeContact } = useSupabaseCrud('contacts');
+  const { update, remove } = useSupabaseCrud('contacts');
   const { insert: insertCall } = useSupabaseCrud('call_logs');
-  const logActivity = useActivityLog();
-  const addToast = useToast();
-  const [showAdd, setShowAdd] = useState(false);
-  const [editContact, setEditContact] = useState(null);
-  const [selectedContact, setSelectedContact] = useState(null);
-  const [showCallLog, setShowCallLog] = useState(false);
-  const [callForm, setCallForm] = useState({ outcome: 'connected', duration_minutes: '', notes: '' });
-  const [search, setSearch] = useState('');
-  const [deleteId, setDeleteId] = useState(null);
+  const log = useActivityLog();
 
-  if (!configured) return <div className="page-content"><EmptyState icon="👥" title="Configure Supabase" text="Go to Settings to set up your database." action={<button className="btn btn-primary" onClick={() => onNavigate('settings')}>Settings</button>} /></div>;
-  if (loading) return <div className="page-content"><Spinner /></div>;
+  const [search, setSearch] = useState('');
+  const [selected, setSelected] = useState(null);
+  const [editing, setEditing] = useState(null);
+  const [logCallFor, setLogCallFor] = useState(null);
+
+  if (!configured) return (
+    <div className="px-4 sm:px-8 py-10 max-w-3xl mx-auto"><EmptyState icon={Users} title="Connect Supabase first"
+      description="Manage recruiters, hiring managers, and your professional network."
+      action={<Button onClick={() => navigate('settings')}>Open Settings</Button>}
+    /></div>
+  );
+  if (loading && contacts.length === 0) return <PageLoader />;
 
   const filtered = contacts.filter(c =>
-    !search || c.name?.toLowerCase().includes(search.toLowerCase()) || c.company?.toLowerCase().includes(search.toLowerCase())
+    !search || [c.name, c.company, c.title, c.email].some(v => v?.toLowerCase().includes(search.toLowerCase()))
   );
 
-  const getContactCalls = (id) => callLogs.filter(l => l.contact_id === id);
-
-  const handleSaveContact = async (data) => {
-    try {
-      if (editContact) {
-        await updateContact(editContact.id, data);
-        addToast('Contact updated', 'success');
-      } else {
-        await insertContact(data);
-        await logActivity('added', 'contact', null, `Added contact "${data.name}"`);
-        addToast('Contact added!', 'success');
-      }
-      setShowAdd(false); setEditContact(null); refetch();
-    } catch (e) { addToast(e.message, 'error'); }
-  };
-
-  const handleLogCall = async () => {
-    if (!selectedContact) return;
-    try {
-      await insertCall({
-        contact_id: selectedContact.id,
-        outcome: callForm.outcome,
-        duration_minutes: callForm.duration_minutes ? parseInt(callForm.duration_minutes) : null,
-        notes: callForm.notes,
-        call_date: new Date().toISOString(),
-      });
-      await logActivity('called', 'contact', selectedContact.id, `Called ${selectedContact.name} — ${callForm.outcome}`);
-      addToast('Call logged!', 'success');
-      setShowCallLog(false);
-      setCallForm({ outcome: 'connected', duration_minutes: '', notes: '' });
-      refetchLogs();
-    } catch (e) { addToast(e.message, 'error'); }
-  };
-
-  const handleDelete = async () => {
-    try { await removeContact(deleteId); addToast('Contact deleted', 'info'); setDeleteId(null); setSelectedContact(null); refetch(); } catch (e) { addToast(e.message, 'error'); }
-  };
+  const callsByContact = (id) => callLogs.filter(l => l.contact_id === id);
 
   return (
-    <div className="page-content">
-      <div className="flex items-center justify-between mb-32">
+    <div className="px-4 sm:px-8 py-6 sm:py-8 max-w-7xl mx-auto w-full">
+      <div className="flex items-end justify-between mb-5 sm:mb-6 flex-col sm:flex-row gap-3">
         <div>
-          <h1 className="page-title">Contacts</h1>
-          <p className="page-subtitle">{contacts.length} professional contacts in your network</p>
+          <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight">Contacts</h1>
+          <p className="text-sm text-[var(--muted-foreground)]">{contacts.length} in your network</p>
         </div>
-        <button className="btn btn-primary" onClick={() => { setEditContact(null); setShowAdd(true); }}>
-          <span>+</span> Add Contact
-        </button>
+        <div className="flex w-full sm:w-auto gap-2">
+          <Button onClick={() => setQuickAddOpen(true)} className="ml-auto"><Plus className="h-4 w-4" />Add</Button>
+        </div>
       </div>
 
-      <div className="card mb-32">
-        <div className="search-bar" style={{ maxWidth: 400 }}>
-          <span style={{ opacity: 0.6 }}>🔍</span>
-          <input 
-            placeholder="Search by name, company, or title..." 
-            value={search} 
-            onChange={e => setSearch(e.target.value)} 
-          />
-        </div>
-      </div>
+      <Card className="mb-4">
+        <CardContent className="p-3">
+          <div className="relative">
+            <SearchIcon className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[var(--muted-foreground)]" />
+            <Input className="pl-9 h-9" placeholder="Search by name, company, title…" value={search} onChange={(e) => setSearch(e.target.value)} />
+          </div>
+        </CardContent>
+      </Card>
 
       {filtered.length === 0 ? (
-        <EmptyState 
-          icon="👥" 
-          title="No contacts found" 
-          text="Start building your network by adding recruiters, hiring managers, and professional connections." 
-          action={<button className="btn btn-primary" onClick={() => setShowAdd(true)}>+ Add Your First Contact</button>} 
+        <EmptyState icon={Users} title="No contacts yet"
+          description="Build your network of recruiters, hiring managers, and referrers."
+          action={<Button onClick={() => setQuickAddOpen(true)}><Plus className="h-4 w-4" />Add contact</Button>}
         />
       ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(360px, 1fr))', gap: 20 }}>
-          {filtered.map(c => {
-            const calls = getContactCalls(c.id);
-            return (
-              <div key={c.id} className="card flex flex-col h-full" onClick={() => setSelectedContact(c)} style={{ cursor: 'pointer' }}>
-                <div className="flex items-start gap-16 mb-20">
-                  <div style={{ 
-                    width: 48, 
-                    height: 48, 
-                    borderRadius: 12, 
-                    background: 'var(--accent-soft)', 
-                    color: 'var(--accent)', 
-                    display: 'flex', 
-                    alignItems: 'center', 
-                    justifyContent: 'center', 
-                    fontSize: 20,
-                    fontWeight: 700
-                  }}>
-                    {c.name?.[0]?.toUpperCase()}
-                  </div>
-                  <div className="flex-1">
-                    <h3 style={{ fontSize: 16, fontWeight: 700, color: 'var(--text-primary)' }}>{c.name}</h3>
-                    <div style={{ fontSize: 13, color: 'var(--text-secondary)', marginTop: 2 }}>{c.title || 'Professional Contact'}</div>
-                  </div>
-                  {calls.length > 0 && <span className="badge badge-applied">{calls.length} calls</span>}
-                </div>
-
-                <div className="flex flex-col gap-8 mb-20">
-                  {c.company && (
-                    <div className="flex items-center gap-8 text-sm text-secondary">
-                      <span style={{ width: 16, textAlign: 'center' }}>🏢</span>
-                      {c.company}
+        <motion.div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3 sm:gap-4"
+          initial="hidden" animate="show" variants={{ show: { transition: { staggerChildren: 0.04 } } }}
+        >
+          {filtered.map(c => (
+            <motion.div key={c.id} variants={{ hidden: { opacity: 0, y: 6 }, show: { opacity: 1, y: 0 } }} layout>
+              <Card hover className="cursor-pointer" onClick={() => setSelected(c)}>
+                <CardContent className="p-4 sm:p-5">
+                  <div className="flex items-start gap-3">
+                    <Avatar className="h-11 w-11">
+                      <AvatarFallback className="bg-gradient-to-br from-[var(--primary)] to-[color-mix(in_oklab,var(--primary)_70%,black)] text-white">{getInitials(c.name)}</AvatarFallback>
+                    </Avatar>
+                    <div className="flex-1 min-w-0">
+                      <div className="font-semibold leading-tight truncate">{c.name}</div>
+                      <div className="text-sm text-[var(--muted-foreground)] truncate">{c.title || 'Contact'}{c.company && ` · ${c.company}`}</div>
                     </div>
-                  )}
-                  {c.email && (
-                    <div className="flex items-center gap-8 text-sm text-secondary">
-                      <span style={{ width: 16, textAlign: 'center' }}>✉️</span>
-                      {c.email}
-                    </div>
-                  )}
-                  {c.phone && (
-                    <div className="flex items-center gap-8 text-sm text-secondary">
-                      <span style={{ width: 16, textAlign: 'center' }}>📞</span>
-                      {c.phone}
-                    </div>
-                  )}
-                </div>
-
-                <div className="mt-auto pt-16 flex items-center justify-between" style={{ borderTop: '1px solid var(--border)' }}>
-                  <span className="text-muted text-xs">Added {timeAgo(c.created_at)}</span>
-                  <button className="btn btn-ghost btn-sm">View Details →</button>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      {/* Contact Detail Modal */}
-      {selectedContact && !showCallLog && (
-        <div className="modal-overlay" onClick={() => setSelectedContact(null)}>
-          <div className="modal modal-lg" onClick={e => e.stopPropagation()}>
-            <div className="modal-header">
-              <div className="flex items-center gap-20">
-                <div style={{ 
-                  width: 56, 
-                  height: 56, 
-                  borderRadius: 16, 
-                  background: 'var(--accent-soft)', 
-                  color: 'var(--accent)', 
-                  display: 'flex', 
-                  alignItems: 'center', 
-                  justifyContent: 'center', 
-                  fontSize: 24,
-                  fontWeight: 700
-                }}>
-                  {selectedContact.name?.[0]?.toUpperCase()}
-                </div>
-                <div>
-                  <h2 className="modal-title">{selectedContact.name}</h2>
-                  <p className="text-secondary" style={{ fontSize: 14 }}>
-                    {selectedContact.title} {selectedContact.company ? `at ${selectedContact.company}` : ''}
-                  </p>
-                </div>
-              </div>
-              <button className="btn btn-ghost" onClick={() => setSelectedContact(null)}>✕</button>
-            </div>
-            <div className="modal-body">
-              <div className="grid-2 gap-32 mb-32">
-                <div className="flex flex-col gap-20">
-                  <h4 className="section-title">Contact Information</h4>
-                  <div className="flex flex-col gap-12">
-                    <div className="form-group">
-                      <label className="form-label">Phone</label>
-                      <p style={{ color: 'var(--text-primary)' }}>{selectedContact.phone || '—'}</p>
-                    </div>
-                    <div className="form-group">
-                      <label className="form-label">Email</label>
-                      <p style={{ color: 'var(--text-primary)' }}>{selectedContact.email || '—'}</p>
-                    </div>
-                    {selectedContact.linkedin_url && (
-                      <div className="form-group">
-                        <label className="form-label">LinkedIn</label>
-                        <p>
-                          <a href={selectedContact.linkedin_url} target="_blank" rel="noopener noreferrer" className="btn btn-secondary btn-sm" style={{ display: 'inline-flex' }}>
-                            View LinkedIn Profile 🔗
-                          </a>
-                        </p>
-                      </div>
+                    {callsByContact(c.id).length > 0 && (
+                      <Badge variant="info" className="shrink-0"><MessageSquare className="h-3 w-3" />{callsByContact(c.id).length}</Badge>
                     )}
                   </div>
-
-                  {selectedContact.notes && (
-                    <div className="mt-8">
-                      <h4 className="section-title">Private Notes</h4>
-                      <p className="text-secondary card" style={{ whiteSpace: 'pre-wrap', fontSize: 14, background: 'var(--bg-input)' }}>
-                        {selectedContact.notes}
-                      </p>
-                    </div>
-                  )}
-                </div>
-
-                <div>
-                  <div className="flex items-center justify-between mb-16">
-                    <h4 className="section-title" style={{ marginBottom: 0 }}>Call History</h4>
-                    <button className="btn btn-primary btn-sm" onClick={() => setShowCallLog(true)}>📞 Log New Call</button>
+                  <div className="mt-3 flex flex-col gap-1.5 text-sm text-[var(--muted-foreground)]">
+                    {c.email && <div className="flex items-center gap-2 truncate"><Mail className="h-3.5 w-3.5 shrink-0" />{c.email}</div>}
+                    {c.phone && <div className="flex items-center gap-2 truncate"><Phone className="h-3.5 w-3.5 shrink-0" />{c.phone}</div>}
                   </div>
-                  
-                  {getContactCalls(selectedContact.id).length === 0 ? (
-                    <div className="empty-state" style={{ padding: '40px 20px' }}>
-                      <p className="text-muted text-sm">No calls logged yet.</p>
-                    </div>
-                  ) : (
-                    <div className="flex flex-col gap-12" style={{ maxHeight: 400, overflowY: 'auto', paddingRight: 8 }}>
-                      {getContactCalls(selectedContact.id).map(call => (
-                        <div key={call.id} className="card" style={{ padding: 16, background: 'var(--bg-input)' }}>
-                          <div className="flex items-center justify-between mb-8">
-                            <span className={`badge ${call.outcome === 'connected' ? 'badge-offer' : 'badge-closed'}`}>
-                              {call.outcome.replace(/_/g, ' ')}
-                            </span>
-                            <span className="text-muted text-xs">{formatDateTime(call.call_date)}</span>
-                          </div>
-                          {call.duration_minutes && (
-                            <div className="text-xs text-secondary mb-8">⏱ Duration: {call.duration_minutes} minutes</div>
-                          )}
-                          {call.notes && (
-                            <p className="text-sm text-secondary italic">"{call.notes}"</p>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-            <div className="modal-footer">
-              <button className="btn btn-danger" onClick={() => setDeleteId(selectedContact.id)}>Delete Contact</button>
-              <div className="flex-1" />
-              <button className="btn btn-secondary" onClick={() => { setEditContact(selectedContact); setShowAdd(true); }}>Edit Contact</button>
-              <button className="btn btn-primary" onClick={() => setShowCallLog(true)}>Log Interaction</button>
-            </div>
-          </div>
-        </div>
+                  <div className="mt-3 pt-3 border-t border-[var(--border)] flex items-center justify-between text-xs">
+                    <span className="text-[var(--muted-foreground)]">Added {timeAgo(c.created_at)}</span>
+                    <Button variant="ghost" size="sm" className="h-6 text-xs">View →</Button>
+                  </div>
+                </CardContent>
+              </Card>
+            </motion.div>
+          ))}
+        </motion.div>
       )}
 
-      {/* Log Call Modal */}
-      <Modal isOpen={showCallLog} onClose={() => setShowCallLog(false)} title={`Log Call — ${selectedContact?.name}`} footer={
-        <><button className="btn btn-secondary" onClick={() => setShowCallLog(false)}>Cancel</button><button className="btn btn-primary" onClick={handleLogCall}>Save Call</button></>
-      }>
-        <div className="flex flex-col gap-16">
-          <div className="form-group"><label className="form-label">Outcome</label>
-            <select className="select" value={callForm.outcome} onChange={e => setCallForm(p => ({ ...p, outcome: e.target.value }))}>
-              {CALL_OUTCOMES.map(o => <option key={o} value={o}>{o.replace(/_/g, ' ')}</option>)}
-            </select>
-          </div>
-          <div className="form-group"><label className="form-label">Duration (minutes)</label><input className="input" type="number" value={callForm.duration_minutes} onChange={e => setCallForm(p => ({ ...p, duration_minutes: e.target.value }))} placeholder="e.g. 15" /></div>
-          <div className="form-group"><label className="form-label">Notes</label><textarea className="textarea" value={callForm.notes} onChange={e => setCallForm(p => ({ ...p, notes: e.target.value }))} placeholder="What was discussed..." /></div>
-        </div>
-      </Modal>
+      <ContactDetail
+        contact={selected}
+        calls={selected ? callsByContact(selected.id) : []}
+        onClose={() => setSelected(null)}
+        onEdit={() => { setEditing(selected); setSelected(null); }}
+        onLogCall={() => setLogCallFor(selected)}
+        onDelete={async () => { await remove(selected.id); toast.success('Contact deleted'); setSelected(null); refetch(); }}
+      />
 
-      {/* Add/Edit Contact Modal */}
-      <ContactFormModal isOpen={showAdd} onClose={() => { setShowAdd(false); setEditContact(null); }} onSave={handleSaveContact} initial={editContact} />
+      <EditContactDialog
+        contact={editing}
+        onClose={() => setEditing(null)}
+        onSave={async (patch) => { await update(editing.id, patch); refetch(); setEditing(null); toast.success('Saved'); }}
+      />
 
-      <ConfirmModal isOpen={!!deleteId} onClose={() => setDeleteId(null)} onConfirm={handleDelete} title="Delete Contact" message="This will also delete all associated call logs. Continue?" />
+      <LogCallDialog
+        contact={logCallFor}
+        onClose={() => setLogCallFor(null)}
+        onSave={async (data) => {
+          try {
+            await insertCall({ ...data, contact_id: logCallFor.id, call_date: new Date().toISOString() });
+            await log('called', 'contact', logCallFor.id, `Called ${logCallFor.name} — ${data.outcome}`);
+            toast.success('Call logged');
+            setLogCallFor(null);
+            refetchLogs();
+          } catch (e) { toast.error(e.message); }
+        }}
+      />
     </div>
   );
 }
 
-function ContactFormModal({ isOpen, onClose, onSave, initial }) {
-  const [form, setForm] = useState(initial || { name: '', title: '', company: '', phone: '', email: '', linkedin_url: '', notes: '' });
-  const set = (k, v) => setForm(p => ({ ...p, [k]: v }));
-
-  useState(() => { if (initial) setForm(initial); }, [initial]);
-
+function ContactDetail({ contact, calls, onClose, onEdit, onLogCall, onDelete }) {
+  if (!contact) return null;
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title={initial ? 'Edit Contact' : 'Add Contact'} footer={
-      <><button className="btn btn-secondary" onClick={onClose}>Cancel</button><button className="btn btn-primary" onClick={() => { if (form.name) { onSave(form); setForm({ name: '', title: '', company: '', phone: '', email: '', linkedin_url: '', notes: '' }); } }}>Save</button></>
-    }>
-      <div className="flex flex-col gap-16">
-        <div className="form-row">
-          <div className="form-group"><label className="form-label">Name *</label><input className="input" value={form.name} onChange={e => set('name', e.target.value)} /></div>
-          <div className="form-group"><label className="form-label">Title</label><input className="input" value={form.title} onChange={e => set('title', e.target.value)} placeholder="e.g. Hiring Manager" /></div>
+    <Dialog open={!!contact} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-w-2xl">
+        <DialogHeader>
+          <div className="flex items-center gap-3">
+            <Avatar className="h-14 w-14">
+              <AvatarFallback className="bg-gradient-to-br from-[var(--primary)] to-[color-mix(in_oklab,var(--primary)_70%,black)] text-white text-base">{getInitials(contact.name)}</AvatarFallback>
+            </Avatar>
+            <div className="min-w-0">
+              <DialogTitle>{contact.name}</DialogTitle>
+              <DialogDescription>{contact.title}{contact.company && ` · ${contact.company}`}</DialogDescription>
+            </div>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild><Button variant="ghost" size="icon"><MoreHorizontal /></Button></DropdownMenuTrigger>
+              <DropdownMenuContent>
+                <DropdownMenuItem onClick={onEdit}><Pencil />Edit</DropdownMenuItem>
+                <DropdownMenuItem onClick={onDelete} className="text-[var(--destructive)] focus:text-[var(--destructive)]"><Trash2 />Delete</DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        </DialogHeader>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          {contact.email && <DetailLink icon={Mail} label="Email" value={contact.email} href={`mailto:${contact.email}`} />}
+          {contact.phone && <DetailLink icon={Phone} label="Phone" value={contact.phone} href={`tel:${contact.phone}`} />}
+          {contact.linkedin_url && <DetailLink icon={LinkedinIcon} label="LinkedIn" value="View profile" href={contact.linkedin_url} external />}
+          {contact.company && <DetailLink icon={Building2} label="Company" value={contact.company} />}
         </div>
-        <div className="form-row">
-          <div className="form-group"><label className="form-label">Company</label><input className="input" value={form.company} onChange={e => set('company', e.target.value)} /></div>
-          <div className="form-group"><label className="form-label">Phone</label><input className="input" value={form.phone} onChange={e => set('phone', e.target.value)} /></div>
+
+        {contact.notes && (
+          <div>
+            <Label>Private notes</Label>
+            <p className="text-sm text-[var(--muted-foreground)] mt-1.5 whitespace-pre-wrap leading-relaxed">{contact.notes}</p>
+          </div>
+        )}
+
+        <div>
+          <div className="flex items-center justify-between mb-2">
+            <Label>Call history ({calls.length})</Label>
+            <Button size="sm" onClick={onLogCall}><Phone className="h-3.5 w-3.5" />Log call</Button>
+          </div>
+          {calls.length === 0 ? (
+            <p className="text-sm text-[var(--muted-foreground)] italic">No calls logged.</p>
+          ) : (
+            <div className="space-y-2 max-h-60 overflow-y-auto">
+              {calls.map(call => (
+                <div key={call.id} className="rounded-lg border border-[var(--border)] bg-[var(--secondary)]/40 p-3">
+                  <div className="flex items-center justify-between mb-1">
+                    <Badge variant={call.outcome === 'connected' ? 'success' : 'outline'}>{call.outcome.replace(/_/g, ' ')}</Badge>
+                    <span className="text-xs text-[var(--muted-foreground)]">{formatDateTime(call.call_date)}</span>
+                  </div>
+                  {call.duration_minutes && <div className="text-xs text-[var(--muted-foreground)]">{call.duration_minutes} min</div>}
+                  {call.notes && <p className="text-sm mt-1 italic">"{call.notes}"</p>}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
-        <div className="form-row">
-          <div className="form-group"><label className="form-label">Email</label><input className="input" type="email" value={form.email} onChange={e => set('email', e.target.value)} /></div>
-          <div className="form-group"><label className="form-label">LinkedIn URL</label><input className="input" value={form.linkedin_url} onChange={e => set('linkedin_url', e.target.value)} /></div>
-        </div>
-        <div className="form-group"><label className="form-label">Notes</label><textarea className="textarea" value={form.notes} onChange={e => set('notes', e.target.value)} /></div>
+
+        <DialogFooter>
+          <Button variant="ghost" onClick={onClose}>Close</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function DetailLink({ icon: Icon, label, value, href, external }) {
+  const inner = (
+    <div className="rounded-lg border border-[var(--border)] bg-[var(--secondary)]/40 p-3 flex items-center gap-3 hover:bg-[var(--secondary)] transition-colors">
+      <span className="flex h-8 w-8 items-center justify-center rounded-md bg-[var(--accent)] text-[var(--primary)]"><Icon className="h-4 w-4" /></span>
+      <div className="min-w-0 flex-1">
+        <div className="text-[10px] uppercase tracking-wider text-[var(--muted-foreground)]">{label}</div>
+        <div className="text-sm font-medium truncate">{value}</div>
       </div>
-    </Modal>
+      {external && <ExternalLink className="h-3.5 w-3.5 text-[var(--muted-foreground)]" />}
+    </div>
+  );
+  return href ? <a href={href} target={external ? '_blank' : undefined} rel="noreferrer">{inner}</a> : inner;
+}
+
+function EditContactDialog({ contact, onClose, onSave }) {
+  const [form, setForm] = useState({});
+  useEffect(() => { if (contact) setForm(contact); }, [contact]);
+  if (!contact) return null;
+  const set = (k, v) => setForm(p => ({ ...p, [k]: v }));
+  return (
+    <Dialog open={!!contact} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent>
+        <DialogHeader><DialogTitle>Edit contact</DialogTitle></DialogHeader>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <Field label="Name"><Input value={form.name || ''} onChange={(e) => set('name', e.target.value)} /></Field>
+          <Field label="Title"><Input value={form.title || ''} onChange={(e) => set('title', e.target.value)} /></Field>
+          <Field label="Company"><Input value={form.company || ''} onChange={(e) => set('company', e.target.value)} /></Field>
+          <Field label="Email"><Input type="email" value={form.email || ''} onChange={(e) => set('email', e.target.value)} /></Field>
+          <Field label="Phone"><Input value={form.phone || ''} onChange={(e) => set('phone', e.target.value)} /></Field>
+          <Field label="LinkedIn"><Input value={form.linkedin_url || ''} onChange={(e) => set('linkedin_url', e.target.value)} /></Field>
+        </div>
+        <Field label="Notes"><Textarea value={form.notes || ''} onChange={(e) => set('notes', e.target.value)} /></Field>
+        <DialogFooter>
+          <Button variant="ghost" onClick={onClose}>Cancel</Button>
+          <Button onClick={() => onSave(form)}>Save</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function LogCallDialog({ contact, onClose, onSave }) {
+  const [form, setForm] = useState({ outcome: 'connected', duration_minutes: '', notes: '' });
+  if (!contact) return null;
+  const set = (k, v) => setForm(p => ({ ...p, [k]: v }));
+  return (
+    <Dialog open={!!contact} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Log call — {contact.name}</DialogTitle>
+          <DialogDescription>Capture what happened so you can follow up smartly.</DialogDescription>
+        </DialogHeader>
+        <Field label="Outcome">
+          <Select value={form.outcome} onValueChange={(v) => set('outcome', v)}>
+            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectContent>{CALL_OUTCOMES.map(o => <SelectItem key={o} value={o}>{o.replace(/_/g, ' ')}</SelectItem>)}</SelectContent>
+          </Select>
+        </Field>
+        <Field label="Duration (minutes)"><Input type="number" value={form.duration_minutes} onChange={(e) => set('duration_minutes', e.target.value)} placeholder="15" /></Field>
+        <Field label="Notes"><Textarea value={form.notes} onChange={(e) => set('notes', e.target.value)} placeholder="What was discussed…" /></Field>
+        <DialogFooter>
+          <Button variant="ghost" onClick={onClose}>Cancel</Button>
+          <Button onClick={() => onSave({ ...form, duration_minutes: form.duration_minutes ? parseInt(form.duration_minutes) : null })}>Save call</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function Field({ label, children }) {
+  return (
+    <div className="flex flex-col gap-1.5">
+      <Label>{label}</Label>
+      {children}
+    </div>
   );
 }

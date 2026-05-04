@@ -1,36 +1,39 @@
+import { format, formatDistanceToNowStrict, isToday, isTomorrow, isYesterday, parseISO, isValid } from 'date-fns';
+
+const safeDate = (input) => {
+  if (!input) return null;
+  if (input instanceof Date) return isValid(input) ? input : null;
+  const d = typeof input === 'string' ? parseISO(input) : new Date(input);
+  return isValid(d) ? d : null;
+};
+
 export function generateId() {
   return crypto.randomUUID();
 }
 
-export function formatDate(dateStr) {
-  if (!dateStr) return '—';
-  const d = new Date(dateStr);
-  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+export function formatDate(input, fmt = 'MMM d, yyyy') {
+  const d = safeDate(input);
+  return d ? format(d, fmt) : '—';
 }
 
-export function formatDateTime(dateStr) {
-  if (!dateStr) return '—';
-  const d = new Date(dateStr);
-  return d.toLocaleDateString('en-US', {
-    month: 'short', day: 'numeric', year: 'numeric',
-    hour: 'numeric', minute: '2-digit'
-  });
+export function formatDateTime(input) {
+  const d = safeDate(input);
+  return d ? format(d, "MMM d, yyyy 'at' h:mm a") : '—';
 }
 
-export function timeAgo(dateStr) {
-  if (!dateStr) return '';
-  const now = new Date();
-  const d = new Date(dateStr);
-  const seconds = Math.floor((now - d) / 1000);
-  if (seconds < 60) return 'just now';
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  if (days < 30) return `${days}d ago`;
-  const months = Math.floor(days / 30);
-  return `${months}mo ago`;
+export function formatRelative(input) {
+  const d = safeDate(input);
+  if (!d) return '';
+  if (isToday(d)) return `Today, ${format(d, 'h:mm a')}`;
+  if (isTomorrow(d)) return `Tomorrow, ${format(d, 'h:mm a')}`;
+  if (isYesterday(d)) return `Yesterday, ${format(d, 'h:mm a')}`;
+  return format(d, "MMM d, h:mm a");
+}
+
+export function timeAgo(input) {
+  const d = safeDate(input);
+  if (!d) return '';
+  return formatDistanceToNowStrict(d, { addSuffix: true });
 }
 
 export function formatSalary(min, max) {
@@ -40,7 +43,7 @@ export function formatSalary(min, max) {
     return `$${n}`;
   };
   const a = fmt(min), b = fmt(max);
-  if (a && b) return `${a} – ${b}`;
+  if (a && b) return a === b ? a : `${a} – ${b}`;
   if (a) return `${a}+`;
   if (b) return `Up to ${b}`;
   return null;
@@ -59,14 +62,46 @@ export function debounce(fn, ms = 300) {
   };
 }
 
-export function getWeekNumber(d) {
-  const date = new Date(d);
-  const startOfYear = new Date(date.getFullYear(), 0, 1);
-  const days = Math.floor((date - startOfYear) / 86400000);
-  return Math.ceil((days + startOfYear.getDay() + 1) / 7);
-}
-
 export function extractCity(location) {
   if (!location) return '';
   return location.split(',')[0].trim();
+}
+
+export function getInitials(name) {
+  if (!name) return '?';
+  return name.split(' ').filter(Boolean).slice(0, 2).map(n => n[0]).join('').toUpperCase();
+}
+
+export function pluralize(n, singular, plural) {
+  return n === 1 ? `${n} ${singular}` : `${n} ${plural || singular + 's'}`;
+}
+
+export function calcStreak(items, dateField = 'created_at') {
+  if (!items?.length) return 0;
+  const days = new Set(
+    items
+      .map(i => safeDate(i[dateField]))
+      .filter(Boolean)
+      .map(d => format(d, 'yyyy-MM-dd'))
+  );
+  let streak = 0;
+  const today = new Date();
+  for (let i = 0; i < 365; i++) {
+    const d = new Date(today);
+    d.setDate(d.getDate() - i);
+    const k = format(d, 'yyyy-MM-dd');
+    if (days.has(k)) streak++;
+    else if (i > 0) break;
+  }
+  return streak;
+}
+
+export function groupBy(items, fn) {
+  const map = new Map();
+  for (const item of items || []) {
+    const k = fn(item);
+    if (!map.has(k)) map.set(k, []);
+    map.get(k).push(item);
+  }
+  return map;
 }
